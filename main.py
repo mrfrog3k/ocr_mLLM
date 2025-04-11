@@ -5,7 +5,7 @@ import requests
 
 def perform_ocr(image_path):
     response = requests.post(
-        "https://c350-34-105-45-238.ngrok-free.app/ocr",  # Thay thế Nrok API của bạn
+        "https://c350-34-105-45-238.ngrok-free.app/ocr",  # Thay thế Nrok API 
         json={"image_url": image_path},
     )
     if response.status_code == 200:
