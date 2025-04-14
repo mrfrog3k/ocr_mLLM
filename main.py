@@ -2,10 +2,13 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import scrolledtext
 import requests
+from openpyxl import Workbook
+import datetime
+import os
 
 def perform_ocr(image_path):
     response = requests.post(
-        "https://c350-34-105-45-238.ngrok-free.app/ocr",  # Thay thế Nrok API 
+        "https://19cc-34-124-151-28.ngrok-free.app/ocr",  # Thay thế API 
         json={"image_url": image_path},
     )
     if response.status_code == 200:
@@ -40,7 +43,6 @@ def display_data(data):
     for widget in table_frame.winfo_children():
         widget.destroy()
 
-    # Tạo Treeview với khả năng chỉnh sửa
     tree = ttk.Treeview(table_frame, columns=list(data[0].keys()), show="headings")
 
     # Tạo tiêu đề cột
@@ -56,6 +58,10 @@ def display_data(data):
     tree.bind("<Double-1>", lambda event: edit_cell(event, tree))
 
     tree.pack(expand=tk.YES, fill=tk.BOTH)
+
+    # Nút xuất Excel
+    export_button = tk.Button(table_frame, text="Xuất Excel", command=lambda: export_to_excel(data))
+    export_button.pack()
 
 def edit_cell(event, tree):
     item = tree.identify_row(event.y)
@@ -75,9 +81,34 @@ def edit_cell(event, tree):
         entry.bind("<Return>", save_change)
         entry.bind("<FocusOut>", save_change)
 
+def export_to_excel(data):
+    workbook = Workbook()
+    sheet = workbook.active
+
+    # Ghi tiêu đề cột
+    header = list(data[0].keys())
+    sheet.append(header)
+
+    # Ghi dữ liệu
+    for row in data:
+        sheet.append(list(row.values()))
+
+    # Lấy ngày giờ hiện tại
+    now = datetime.datetime.now()
+    file_name = now.strftime("%Y-%m-%d_%H-%M-%S.xlsx")
+
+    # Tạo thư mục data_result nếu chưa tồn tại
+    if not os.path.exists("data_result"):
+        os.makedirs("data_result")
+
+    # Lưu file Excel vào thư mục data_result
+    file_path = os.path.join("data_result", file_name)
+    workbook.save(file_path)
+    print(f"Dữ liệu đã được xuất ra file {file_path}")
+
 # Tạo cửa sổ chính
 window = tk.Tk()
-window.title("NHẬN DẠNG HOÁ ĐƠN")
+window.title("OCR Image Recognition")
 
 # Nhãn và ô nhập URL
 url_label = tk.Label(window, text="URL hình ảnh:")
