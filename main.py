@@ -1,132 +1,197 @@
-import tkinter as tk
-from tkinter import ttk
-from tkinter import scrolledtext
 import requests
-from openpyxl import Workbook
-import datetime
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
 import os
+import datetime
+import base64
+from openpyxl import Workbook
 
-def perform_ocr(image_path):
-    response = requests.post(
-        "https://19cc-34-124-151-28.ngrok-free.app/ocr",  # Thay thế API 
-        json={"image_url": image_path},
-    )
-    if response.status_code == 200:
-        return response.json().get("response_message")
+# OCR API call
+def perform_ocr(image_url=None, image_base64=None):
+    payload = {}
+    if image_url:
+        payload["image_url"] = image_url
+    elif image_base64:
+        payload["image_base64"] = image_base64
     else:
-        return f"Lỗi: {response.status_code}, {response.text}"
+        return "Không có ảnh để gửi."
 
-def process_image():
-    image_url = url_entry.get()
-    ocr_result = perform_ocr(image_url)
-    result_text.delete(1.0, tk.END)  # Xóa nội dung cũ
-    result_text.insert(tk.END, ocr_result)
+    try:
+        response = requests.post(
+            "https://0a25-34-16-163-174.ngrok-free.app/ocr",
+            json=payload
+        )
+        if response.status_code == 200:
+            return response.json().get("response_message")
+        else:
+            return f"Lỗi {response.status_code}: {response.text}"
+    except Exception as e:
+        return f"Exception: {str(e)}"
 
-    # Giả sử ocr_result chứa dữ liệu bảng dạng text, cần xử lý để tạo danh sách từ điển
-    data = parse_ocr_result(ocr_result)
-    if data:
-        display_data(data)
+# Mã hóa ảnh sang base64
+def encode_image_base64(filepath):
+    with open(filepath, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
 
-def parse_ocr_result(ocr_result):
-    # kết quả OCR là dạng văn bản có cấu trúc bảng
-    lines = ocr_result.split('\n')
-    header = [cell.strip() for cell in lines[0].split('|')]
-    data = []
-    for line in lines[2:]:  # Bỏ qua dòng tiêu đề và dòng phân cách
-        cells = [cell.strip() for cell in line.split('|')]
-        if len(cells) == len(header):
-            data.append(dict(zip(header, cells)))
-    return data
+# Phân tích dữ liệu dạng bảng
+def parse_ocr_table(text):
+    lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
+    headers = []
+    data_rows = []
 
-def display_data(data):
-    # Xóa bảng cũ nếu có
-    for widget in table_frame.winfo_children():
-        widget.destroy()
+    for line in lines:
+        if line.startswith("|") and line.endswith("|"):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if not headers:
+                headers = cells
+            else:
+                while len(cells) < len(headers):
+                    cells.append("")
+                while len(cells) > len(headers):
+                    headers.append(f"Cột {len(headers)+1}")
+                data_rows.append(cells)
 
-    tree = ttk.Treeview(table_frame, columns=list(data[0].keys()), show="headings")
+    return headers, data_rows
 
-    # Tạo tiêu đề cột
-    for col in data[0].keys():
+# Gửi URL
+def on_submit():
+    image_url = url_entry.get().strip()
+    if not image_url:
+        messagebox.showwarning("Thiếu dữ liệu", "Vui lòng nhập đường dẫn ảnh.")
+        return
+
+    result = perform_ocr(image_url=image_url)
+    handle_result(result)
+
+# Chọn ảnh từ thiết bị
+def on_select_file():
+    file_path = filedialog.askopenfilename(
+        title="Chọn ảnh hóa đơn",
+        filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp")]
+    )
+    if not file_path:
+        return
+
+    image_base64 = encode_image_base64(file_path)
+    result = perform_ocr(image_base64=image_base64)
+    handle_result(result)
+
+# Hiển thị dữ liệu trả về
+def handle_result(result):
+    if not result or "|" not in result:
+        messagebox.showerror("Lỗi", "Không kết nối được với Server.")
+        return
+
+    headers, rows = parse_ocr_table(result)
+
+    if not headers or not rows:
+        messagebox.showinfo("Không có dữ liệu", "Không tìm thấy bảng hợp lệ.")
+        return
+
+    create_tree(headers)
+    for row in rows:
+        tree.insert("", tk.END, values=row)
+
+    global current_headers
+    current_headers = headers
+
+# Tạo bảng Treeview
+def create_tree(headers):
+    global tree, tree_frame
+    if tree:
+        tree.destroy()
+
+    tree = ttk.Treeview(tree_frame, columns=headers, show="headings")
+
+    for col in headers:
         tree.heading(col, text=col)
-        tree.column(col, width=100)  # Điều chỉnh chiều rộng cột
+        tree.column(col, width=120, anchor=tk.CENTER)
 
-    # Chèn dữ liệu vào Treeview
-    for row in data:
-        tree.insert("", tk.END, values=list(row.values()))
+    tree.pack(fill=tk.BOTH, expand=True)
+    tree.bind("<Double-1>", on_double_click)
 
-    # Cho phép chỉnh sửa dữ liệu trực tiếp trong bảng
-    tree.bind("<Double-1>", lambda event: edit_cell(event, tree))
+# Sửa dữ liệu trong bảng
+def on_double_click(event):
+    global edit_entry
 
-    tree.pack(expand=tk.YES, fill=tk.BOTH)
+    if edit_entry:
+        edit_entry.destroy()
+        edit_entry = None
 
-    # Nút xuất Excel
-    export_button = tk.Button(table_frame, text="Xuất Excel", command=lambda: export_to_excel(data))
-    export_button.pack()
+    region = tree.identify("region", event.x, event.y)
+    if region != "cell":
+        return
 
-def edit_cell(event, tree):
-    item = tree.identify_row(event.y)
-    column = tree.identify_column(event.x)
-    if item and column != '#0':  # Kiểm tra xem có phải ô dữ liệu không
-        x, y, width, height = tree.bbox(item, column)
-        value = tree.set(item, column)
-        entry = tk.Entry(table_frame, width=width // 8)  # Chia 8 để đảm bảo kích thước phù hợp
-        entry.insert(0, value)
-        entry.place(x=x, y=y)
-        entry.focus()
+    row_id = tree.identify_row(event.y)
+    column_id = tree.identify_column(event.x)
+    if not row_id or not column_id:
+        return
 
-        def save_change(event):
-            tree.set(item, column, entry.get())
-            entry.destroy()
+    x, y, width, height = tree.bbox(row_id, column_id)
+    column_index = int(column_id[1:]) - 1
+    current_value = tree.item(row_id)["values"][column_index]
 
-        entry.bind("<Return>", save_change)
-        entry.bind("<FocusOut>", save_change)
+    edit_entry = tk.Entry(tree)
+    edit_entry.place(x=x, y=y, width=width, height=height)
+    edit_entry.insert(0, current_value)
+    edit_entry.focus()
 
-def export_to_excel(data):
-    workbook = Workbook()
-    sheet = workbook.active
+    def save_edit(event):
+        new_value = edit_entry.get()
+        values = list(tree.item(row_id)["values"])
+        values[column_index] = new_value
+        tree.item(row_id, values=values)
+        edit_entry.destroy()
 
-    # Ghi tiêu đề cột
-    header = list(data[0].keys())
-    sheet.append(header)
+    edit_entry.bind("<Return>", save_edit)
+    edit_entry.bind("<FocusOut>", lambda e: edit_entry.destroy())
 
-    # Ghi dữ liệu
-    for row in data:
-        sheet.append(list(row.values()))
+# Xuất ra Excel
+def export_to_excel():
+    if not current_headers or not tree.get_children():
+        messagebox.showwarning("Không có dữ liệu", "Không có bảng nào để xuất.")
+        return
 
-    # Lấy ngày giờ hiện tại
-    now = datetime.datetime.now()
-    file_name = now.strftime("%Y-%m-%d_%H-%M-%S.xlsx")
+    folder = "data_result"
+    os.makedirs(folder, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = os.path.join(folder, f"{timestamp}.xlsx")
 
-    # Tạo thư mục data_result nếu chưa tồn tại
-    if not os.path.exists("data_result"):
-        os.makedirs("data_result")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "OCR Result"
 
-    # Lưu file Excel vào thư mục data_result
-    file_path = os.path.join("data_result", file_name)
-    workbook.save(file_path)
-    print(f"Dữ liệu đã được xuất ra file {file_path}")
+    ws.append(current_headers)
+    for row_id in tree.get_children():
+        row = tree.item(row_id)["values"]
+        ws.append(row)
 
-# Tạo cửa sổ chính
-window = tk.Tk()
-window.title("OCR Image Recognition")
+    wb.save(filename)
+    messagebox.showinfo("Xuất thành công", f"Đã lưu file: {filename}")
 
-# Nhãn và ô nhập URL
-url_label = tk.Label(window, text="URL hình ảnh:")
-url_label.pack()
-url_entry = tk.Entry(window, width=50)
+# Giao diện chính
+root = tk.Tk()
+root.title("OCR từ ảnh hóa đơn")
+root.geometry("950x650")
+
+tk.Label(root, text="Nhập đường dẫn ảnh hóa đơn:").pack(pady=5)
+url_entry = tk.Entry(root, width=100)
 url_entry.pack()
 
-# Nút gửi yêu cầu
-process_button = tk.Button(window, text="Xử lý", command=process_image)
-process_button.pack()
+submit_button = tk.Button(root, text="Gửi yêu cầu OCR (từ URL)", command=on_submit)
+submit_button.pack(pady=5)
 
-# Vùng văn bản kết quả OCR
-result_text = scrolledtext.ScrolledText(window, width=60, height=10)
-result_text.pack()
+select_button = tk.Button(root, text="Chọn ảnh từ thiết bị", command=on_select_file)
+select_button.pack(pady=5)
 
-# Frame để chứa bảng
-table_frame = tk.Frame(window)
-table_frame.pack(expand=tk.YES, fill=tk.BOTH)
+export_button = tk.Button(root, text="Xuất Excel", command=export_to_excel)
+export_button.pack(pady=10)
 
-# Chạy vòng lặp sự kiện
-window.mainloop()
+tree_frame = tk.Frame(root)
+tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+tree = None
+edit_entry = None
+current_headers = []
+
+root.mainloop()
