@@ -5,7 +5,7 @@ from PIL import Image, ImageTk
 import os
 import datetime
 import base64
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 # OCR API call
 def perform_ocr(image_url=None, image_base64=None):
@@ -19,7 +19,7 @@ def perform_ocr(image_url=None, image_base64=None):
 
     try:
         response = requests.post(
-            "https://e633-34-87-159-177.ngrok-free.app/ocr",
+            "https://8620-34-169-92-156.ngrok-free.app/ocr",
             json=payload
         )
         if response.status_code == 200:
@@ -176,20 +176,26 @@ def export_to_excel():
 
     folder = "data_result"
     os.makedirs(folder, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = os.path.join(folder, f"{timestamp}.xlsx")
+    filename = os.path.join(folder, "ocr_data.xlsx")
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "OCR Result"
+    file_exists = os.path.exists(filename)
 
-    ws.append(current_headers)
+    if file_exists:
+        wb = load_workbook(filename)
+        ws = wb.active
+    else:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "OCR Result"
+        ws.append(current_headers)  # Ghi header nếu tạo file mới
+
+    # Ghi dữ liệu từ bảng
     for row_id in tree.get_children():
         row = tree.item(row_id)["values"]
         ws.append(row)
 
     wb.save(filename)
-    messagebox.showinfo("Xuất thành công", f"Đã lưu file: {filename}")
+    messagebox.showinfo("Xuất thành công", f"Dữ liệu đã được thêm vào file: {filename}")
 
 # Giao diện chính
 root = tk.Tk()
